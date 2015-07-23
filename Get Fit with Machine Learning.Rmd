@@ -1,131 +1,156 @@
 ---
 title: "Get Fit with Machine Learning"
 author: "Norbert Widmann"
-date: "July 19, 2015"
+date: "July 23, 2015"
 output: html_document
 ---
 
 <!--  
-Has the student submitted a github repo?#
+x echo # MachineLearningAssignment >> README.md
+x git init
+x git add README.md
+git commit -m "first commit"
+x git remote add origin https://github.com/Nop287/MachineLearningAssignment.git
+git push -u origin master
+
+Has the student submitted a github repo?
 Does the submission build a machine learning algorithm to predict activity quality from activity monitors?
 Do the authors describe what they expect the out of sample error to be and estimate the error appropriately with cross-validation?
+
+Save the data for another day:
+saveRDS(modFit, file="modFit.rds")
+saveRDS(test_small, file="test_small.rds")
+saveRDS(train_small, file="train_small.rds")
 -->
 
 
-Executive Summary
------------------
+Introduction
+------------
 
-MotorTrend is giving you all the news regarding the fuel eficiency of automatic transmissions compared with manual transmissions. To answer this question we are using the newest statistical methods to give our readers the best posible information.
-
-The main conclusion is that manual vs. automatic transmission by itself practically does not affect fuel efficiency at all. The Weight of the vehicle is a much more important factor as a predictor for fuel efficiency. So the question "To shift or not to shift" still remains a matter of personal preference. But if you want to safe on fuel better buy a light vehicle.
+This work is based on a dataset on weight lifting exercises used in the paper "Qualitative Activity Recognition of Weight Lifting Exercises" by E. Velloso et. al. Focus of the work here is classifying the quality of exercise execution into five different classes (A to E) based on data from wearable sensors.
 
 Data Set
 --------
 
-Our experts invested a lot of work to get the best possible data on all the vehicles you might consider buying. This valuable data was stored in the mtcars dataset. You can find a summary of the dataset in the appendix. The transmission is coded in the attribute am. We make a factor with the descriptive names automatic and manual out of it.
+Looking at the dataset and reading the related paper we see that some preprocessing has already been done. Basically the time series data has been averaged using a sliding window and only aggregated values for the sensors are given.
+
+The basic structure is that the value classe is to be predicted and there are 159 potential features. Importing the csv data using read.csv results in features getting the wrong classes. So first we convert user_name and classe as factors. Then we standardize the relevant features to numeric.
+
+The data contains a serious amount of NA values. These we set to zero for determing columns which are near zero values. We exclude these columnus from further analysis as they contain no relevant information.
+
+```{r warning=FALSE}
+library(AppliedPredictiveModeling)
+library(caret)
+training <- read.csv("pml-training.csv", stringsAsFactors=FALSE)
+training$user_name = factor(training$user_name)
+training$classe = factor(training$classe)
+training[,8:159] <- sapply(training[,8:159], as.numeric)
+tmp <- training
+tmp[is.na(tmp)] <- 0
+nzv <- nearZeroVar(tmp)
+rm(tmp)
+training <- training[,-nzv]
+```
+
+Now we check for features which are highly correlated and remove them. These measures are taken to reduce the number of features to be used in the model and therefore reduce the required training time for the model. We also remove the first few attributes (id, timestamps) since they are not relevant as features to predict the classification. We retain the user_name which should be relevant for prediction.
+
+```{r}
+classe <- training[, 59]
+user <- training[,2]
+training <- training[,7:dim(training)[2] - 1]
+highlyCorFeat <- findCorrelation(cor(training), cutoff = .75)
+training <- training[,-highlyCorFeat]
+```
+
+Next we add additional dummy features for the name of the person performing the exercise since this probably is a highly relevant feature. Finally we add classe as the value to be predicter to the data set. After this we are ready to train a model and we reduced the features to consider from 159 to 39 which should result in a significant reduction in training time for the model.
+
+```{r}
+training$adelmo <- 0
+training$adelmo[user == "adelmo"] <- 1
+training$carlitos <- 0
+training$carlitos[user == "carlitos"] <- 1
+training$charles <- 0
+training$charles[user == "charles"] <- 1
+training$eurico <- 0
+training$eurico[user == "eurico"] <- 1
+training$jeremy <- 0
+training$jeremy[user == "jeremy"] <- 1
+training$pedro <- 0
+training$pedro[user == "pedro"] <- 1
+training$classe <- classe
+```
+
+Model Training and Evaluation
+-----------------------------
+
+Now we are ready to train the model. Since we are predicting a categorical variable and we assume a non-linear relationship between features and result we use a random forest as the model.
+
+To assess the quality of the model we split up the training data in two separate data sets: One for training the model and one for testing the model and assessing the quality.
+
+```{r}
+set.seed(4711)
+train_test <- createDataPartition(y=training$classe, p=.6, list=FALSE)
+train_small <- training[train_test,]
+test_small <- training[-train_test,]
+```
+
+We train our random forest on the train_small test set. We use cross validation to optimise the parameters.
+
+```{r}
+ctrl = trainControl(method="cv",number=5)
+# Note: The model has been trained and stored beforhand.
+# modFit <- train(classe ~ ., data=train_small, method="rf",
+#                 trControl=ctrl, prox=TRUE, allowParallel=TRUE)
+# saveRDS(modFit, file="modFit.rds")
+modFit <- readRDS("modFit.rds")
+```
+
+Given that we used cross validation we can look at the information of the model to get some indication of the out of sample error. The accuracy is very high at about 99,7% for the best mtry parameter.
+
+```{r}
+modFit
+```
+
+Now we assess the model quality using the test_small data set to predict the out of sample error. This confirms the accuracy given by the cross validation at 99,7%. As this is a very high accuracy we do not evaluate any further models.
+
+```{r}
+result <- predict(modFit, test_small)
+confusionMatrix(test_small$classe, result)
+```
+
+Finally we predict the actual test set to get the final results of our model building. For that we have to prepare the final test set according to the training data set, i.e. convert everything to numbers and add a categorial variabel for the test subject.
+
+```{r}
+final_test <- read.csv("pml-testing.csv", stringsAsFactors=FALSE)
+final_test[,8:159] <- sapply(final_test[,8:159], as.numeric)
+user <- final_test[,2]
+final_test <- final_test[,7:dim(final_test)[2]]
+final_test$adelmo <- 0
+final_test$adelmo[user == "adelmo"] <- 1
+final_test$carlitos <- 0
+final_test$carlitos[user == "carlitos"] <- 1
+final_test$charles <- 0
+final_test$charles[user == "charles"] <- 1
+final_test$eurico <- 0
+final_test$eurico[user == "eurico"] <- 1
+final_test$jeremy <- 0
+final_test$jeremy[user == "jeremy"] <- 1
+final_test$pedro <- 0
+final_test$pedro[user == "pedro"] <- 1
+final_result <- predict(modFit, final_test)
+answers <- as.character(final_result)
+answers
+```
+
+We upload the predictions. Our model has predicted 20 out of 20 classes correctly.
 
 ```{r echo=FALSE}
-mtcars$am[mtcars$am == 0] <- "automatic"
-mtcars$am[mtcars$am == 1] <- "manual"
-mtcars$am <- factor(mtcars$am)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
 ```
-
-Explorative Data Analysis
--------------------------
-
-As a basis for analysing the dependency between the transmission type and the fuel consumption in detail we look at the data set. You will find a boxplot in the appendix.
-
-From the exploratory box plot we can deduce that there is a dependency between transmission type and fuel consumption. Vehicles with a manuel transmission on average have a better  fuel efficiency. We can also easily see that the variance is different between the two transmission  types and that there are outliers. This is a hint that there may be other possible variables affecting the fuel consumption, e.g. the displacement or the weight of the vehicle. 
-
-We created plots for these two continuous variables in the appendix. From these plots we can deduce that a larger displacement leads to less fuel efficiency and also greater weight leads to less fuel efficient cars. 
-
-As a last step in the explorative analysis we look at the correlation of these attributes:
-
-```{r echo=FALSE}
-cordf <- cbind(mtcars$mpg, mtcars$disp, mtcars$wt, mtcars$am)
-colnames(cordf) <- c("mpg", "disp", "wt", "am")
-cor(cordf)
-```
-
-Given the high correlation between weight and displacement we are gonna look only at weight as an additional parameter for the following regression analysis.
-
-Regression Analysis
--------------------
-
-Given the high inverse correlation between vehicle weight and mpg of -0.87 we are first going to look at a simple linear regression of verhicle weight as predictor and mpg as outcome. The plot can be found in the appendix, we added the transmission type as color for informational purposes. Now we look at the coefficients of this regression:
-
-```{r echo=FALSE}
-model = lm(mpg ~ wt, mtcars)
-summary(model)$coef
-```
-
-Every additional ton of vehicle weight leads to a reduced mpg of about 5.34 and therefore causes significantly worse fuel efficiency. The very low P value shows a high statistical significance of vehicle weight as a predictor of fuel efficiency.
-
-Now we add transmission type as a predictor and look at the coefficients again.
-
-```{r echo=FALSE}
-model = lm(mpg ~ am + wt, mtcars)
-summary(model)$coef
-```
-
-From the coefficients we can see that switching from automatic to manual transaction just lowers the medium mpg corrected by weight by about 0.02. Also the P value of of 0.99 shows low statistical significance as a predictor.
-
-Looking at the residual plot of the regression with wt as the predictor we see a reasonable distribution of the residuals. After the regression analysis we recommend that weight is the main predictor of fuel efficiency.
-
-Inference
----------
-
-Finally we test our two models with an anova test to ensure that adding transmission type as a predictor does not improve the model.
-
-```{r echo=FALSE}
-model1 <- lm(mpg ~ wt, data=mtcars)
-model2 <- lm(mpg ~ am + wt, data=mtcars)
-anova(model1, model2)
-```
-
-The very high P-value shows again that we do not get improved prediction quality by adding transmission type. Therefore we conclude that weight is by far the better predictor for fuel efficiency.
-
-\newpage
-
-Appendix
---------
-
-The mtcars dataset.
-
-```{r}
-str(mtcars)
-```
-
-Box plot of transmission type vs. mpg:
-
-```{r}
-boxplot(mpg ~ am, mtcars)
-```
-
-
-Plot of displacement vs. mpg:
-
-```{r}
-plot(mpg ~ disp, mtcars)
-```
-
-Plot of weight of vehicle vs. mpg:
-
-```{r}
-plot(mpg ~ wt, mtcars)
-```
-
-Plot of linear regression with weight as predictor and mpg as outcome. Vehicles with manual transmissions are red, vehicles with automatic transmission black:
-
-```{r}
-plot(mpg ~ wt, mtcars, col=am)
-abline(lm(mpg ~ wt, mtcars))
-```
-
-Residual plot of the regression with weight as predictor, transmission as color (see above):
-
-```{r}
-plot(mtcars$wt, resid(lm(mpg ~ wt, mtcars)), col=mtcars$am)
-abline(0, 0)
-```
-
